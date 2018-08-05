@@ -1,2 +1,4 @@
+#!/usr/bin/env python
 # -*- coding: utf-8 -*-
-import core
+import models
+import controllers

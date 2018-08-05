@@ -5,11 +5,12 @@ from odoo import models, fields, api
 import datetime
 
 
-class report_stock_transceive(models.Model):
+class ReportStockTransceive(models.Model):
     _name = 'report.stock.transceive'
+    _description = u'商品收发明细表'
     _inherit = 'report.base'
 
-    goods = fields.Char(u'产品')
+    goods = fields.Char(u'商品')
     attribute = fields.Char(u'属性')
     id_lists = fields.Text(u'库存调拨id列表')
     uom = fields.Char(u'单位')
@@ -73,13 +74,17 @@ class report_stock_transceive(models.Model):
         ''' % (sql_type == 'out' and 'warehouse_id' or 'warehouse_dest_id')
 
     def where_sql(self, sql_type='out'):
+        extra = ''
+        if self.env.context.get('warehouse_id'):
+            extra += 'AND wh.id = {warehouse_id}'
+        if self.env.context.get('goods_id'):
+            extra += 'AND goods.id = {goods_id}'
         return '''
         WHERE line.state = 'done'
           AND wh.type = 'stock'
           AND line.date < '{date_end}'
-          AND wh.name ilike '%{warehouse}%'
-          AND goods.name ilike '%{goods}%'
-        '''
+          %s
+        ''' % extra
 
     def group_sql(self, sql_type='out'):
         return '''
@@ -99,8 +104,8 @@ class report_stock_transceive(models.Model):
         return {
             'date_start': context.get('date_start') or '',
             'date_end': date_end,
-            'warehouse': context.get('warehouse') or '',
-            'goods': context.get('goods') or '',
+            'warehouse_id': context.get('warehouse_id') and context.get('warehouse_id')[0] or '',
+            'goods_id': context.get('goods_id') and context.get('goods_id')[0] or '',
         }
 
     def get_record_key(self, record, sql_type='out'):
@@ -127,25 +132,25 @@ class report_stock_transceive(models.Model):
         tag = sql_type == 'out' and -1 or 1
 
         value.update({
-                'goods_qty_begain': value.get('goods_qty_begain', 0) +
+            'goods_qty_begain': value.get('goods_qty_begain', 0) +
                     (tag * record.get('goods_qty_begain', 0)),
-                'cost_begain': value.get('cost_begain', 0) +
+            'cost_begain': value.get('cost_begain', 0) +
                     (tag * record.get('cost_begain', 0)),
-                'goods_qty_end': value.get('goods_qty_end', 0) +
+            'goods_qty_end': value.get('goods_qty_end', 0) +
                     (tag * record.get('goods_qty_end', 0)),
-                'cost_end': value.get('cost_end', 0) +
+            'cost_end': value.get('cost_end', 0) +
                     (tag * record.get('cost_end', 0)),
 
-                'goods_qty_out': value.get('goods_qty_out', 0) +
+            'goods_qty_out': value.get('goods_qty_out', 0) +
                     (sql_type == 'out' and record.get('goods_qty', 0) or 0),
-                'cost_out': value.get('cost_out', 0) +
+            'cost_out': value.get('cost_out', 0) +
                     (sql_type == 'out' and record.get('cost', 0) or 0),
-                'goods_qty_in': value.get('goods_qty_in', 0) +
+            'goods_qty_in': value.get('goods_qty_in', 0) +
                     (sql_type == 'in' and record.get('goods_qty', 0) or 0),
-                'cost_in': value.get('cost_in', 0) +
+            'cost_in': value.get('cost_in', 0) +
                     (sql_type == 'in' and record.get('cost', 0) or 0),
-                'id_lists': value.get('id_lists', []) + record.get('id_lists', []),
-            })
+            'id_lists': value.get('id_lists', []) + record.get('id_lists', []),
+        })
 
     def compute_history_stock_by_collect(self, res, records, sql_type='out'):
         for record in records:
@@ -181,12 +186,19 @@ class report_stock_transceive(models.Model):
         # 获得'report.stock.transceive'记录集
         move_line_lists = self.get_data_from_cache(sql_type='out')
 
+        date_start = self.env.context.get('date_start')
+        date_end = self.env.context.get('date_end')
         for line in move_line_lists:
             if line.get('id') == self.id:
-                move_line_ids = line.get('id_lists')
+                domain_dict = [('date', '>=', date_start),
+                               ('date', '<=', date_end),
+                               ('id', 'in', line.get('id_lists'))
+                               ]
+                move_line_ids = [line.id for line in self.env['wh.move.line'].search(domain_dict)]
 
         view = self.env.ref('warehouse.wh_move_line_tree')
         return {
+            'name': u'库存调拨' + date_start + u'~' + date_end,
             'view_mode': 'tree',
             'views': [(view.id, 'tree')],
             'res_model': 'wh.move.line',

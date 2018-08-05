@@ -55,9 +55,9 @@
                 </button>
             </field>
         </record>
-        <!-- 采购调整单打印 -->
+        <!-- 采购变更单打印 -->
         <record id='report_buy_adjust' model='ir.actions.report.xml'>
-            <field name='name'>采购调整单</field>
+            <field name='name'>采购变更单</field>
             <field name='model'>buy.adjust</field>
             <field name='report_type'>docx</field>
             <field name='report_name'>buy.adjust</field>
@@ -78,11 +78,13 @@
     	<record id='export_buy_receipt_in' model='report.template'>
     		<field name='model_id' ref='buy.model_buy_receipt'/>
     		<field name='file_address'>buy/template/buy_receipt_in.xls</field>
+            <field name="blank_rows">1</field>
             <field name='active' >True</field>
     	</record>
     	<record id='export_buy_order' model='report.template'>
     		<field name='model_id' ref='buy.model_buy_order'/>
     		<field name='file_address'>buy/template/buy_order.xls</field>
+            <field name="blank_rows">1</field>
             <field name='active' >True</field>
     	</record>
     </data>

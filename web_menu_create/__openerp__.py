@@ -24,12 +24,12 @@
 ##############################################################################
 {
     'name': 'Web Menu Create',
-    'version': '0.1',
+    'version': '11.11',
     "author": "zhengXiang",
     "website": "http://www.osbzr.com",
     'category': 'Technical Settings',
     'depends': [
-        'web','base',
+        'web', 'base',
     ],
     'description':
     """

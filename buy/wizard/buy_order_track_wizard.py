@@ -5,7 +5,7 @@ from odoo import models, fields, api
 from odoo.exceptions import UserError
 
 
-class buy_order_track_wizard(models.TransientModel):
+class BuyOrderTrackWizard(models.TransientModel):
     _name = 'buy.order.track.wizard'
     _description = u'采购订单跟踪表向导'
 
@@ -20,15 +20,20 @@ class buy_order_track_wizard(models.TransientModel):
     date_start = fields.Date(u'开始日期', default=_default_date_start,
                              help=u'报表汇总的开始日期，默认为公司启用日期')
     date_end = fields.Date(u'结束日期', default=_default_date_end,
-                             help=u'报表汇总的结束日期，默认为当前日期')
+                           help=u'报表汇总的结束日期，默认为当前日期')
     partner_id = fields.Many2one('partner', u'供应商',
-                             help=u'按指定供应商进行统计')
+                                 help=u'只统计选定的供应商')
     goods_id = fields.Many2one('goods', u'商品',
-                             help=u'按指定商品进行统计')
+                               help=u'只统计选定的商品')
     order_id = fields.Many2one('buy.order', u'订单号',
-                             help=u'按指定订单号进行统计')
+                               help=u'只统计选定的订单号')
     warehouse_dest_id = fields.Many2one('warehouse', u'仓库',
-                             help=u'按指定仓库进行统计')
+                                        help=u'只统计选定的仓库')
+    company_id = fields.Many2one(
+        'res.company',
+        string=u'公司',
+        change_default=True,
+        default=lambda self: self.env['res.company']._company_default_get())
 
     def _get_domain(self):
         '''返回wizard界面上条件'''
@@ -43,7 +48,8 @@ class buy_order_track_wizard(models.TransientModel):
         if self.order_id:
             domain.append(('order_id.id', '=', self.order_id.id))
         if self.warehouse_dest_id:
-            domain.append(('order_id.warehouse_dest_id', '=', self.warehouse_dest_id.id))
+            domain.append(('order_id.warehouse_dest_id',
+                           '=', self.warehouse_dest_id.id))
         return domain
 
     def _get_wh_in_date(self, line):
@@ -60,99 +66,46 @@ class buy_order_track_wizard(models.TransientModel):
             wh_in_date = wh_move_line.date
         return wh_in_date
 
-    def _create_track_line(self, line, qty, amount, qty_not_in):
-        '''创建跟踪表明细行（非小计行）'''
-        return self.env['buy.order.track'].create({
-                'goods_code': line.goods_id.code,
-                'goods_id': line.goods_id.id,
-                'attribute': line.attribute_id.name,
-                'uom': line.uom_id.name,
-                'date': line.order_id.date,
-                'order_name': line.order_id.name,
-                'partner_id': line.order_id.partner_id.id,
-                'warehouse_dest_id': line.order_id.warehouse_dest_id.id,
-                'goods_state': line.order_id.goods_state,
-                'qty': qty,
-                'amount': amount,
-                'qty_not_in': qty_not_in,
-                'planned_date': line.order_id.planned_date,
-                'wh_in_date': self._get_wh_in_date(line),  # 入库日期
-                'note': line.note,
-            })
-
-    def _create_track_summary_line(self, qty, amount, qty_not_in):
-        '''创建跟踪表小计行'''
-        return self.env['buy.order.track'].create({
-                'goods_state': u'小计',
-                'qty': qty,
-                'amount': amount,
-                'qty_not_in': qty_not_in,
-            })
+    def _prepare_track_line(self, line, qty, amount, qty_not_in):
+        '''返回跟踪表明细行（非小计行）'''
+        return {
+            'goods_code': line.goods_id.code,
+            'goods_id': line.goods_id.id,
+            'attribute': line.attribute_id.name,
+            'uom': line.uom_id.name,
+            'date': line.order_id.date,
+            'order_name': line.order_id.name,
+            'partner_id': line.order_id.partner_id.id,
+            'warehouse_dest_id': line.order_id.warehouse_dest_id.id,
+            'goods_state': line.order_id.goods_state,
+            'qty': qty,
+            'amount': amount,
+            'qty_not_in': qty_not_in,
+            'planned_date': line.order_id.planned_date,
+            'wh_in_date': self._get_wh_in_date(line),  # 入库日期
+            'note': line.note,
+            'type': line.order_id.type,
+        }
 
     @api.multi
     def button_ok(self):
+        self.ensure_one()
         res = []
         if self.date_end < self.date_start:
             raise UserError(u'开始日期不能大于结束日期！')
 
-        index = 0
-        sum_qty = sum_amount = sum_not_in = 0   # 数量、金额、未入库数量合计
-        total_qty = total_amount = total_not_in = 0  # 数量、金额、未入库数量小计
-        line_ids = []
         buy_order_line = self.env['buy.order.line']
         for line in buy_order_line.search(self._get_domain(), order='goods_id'):
-            line_ids.append(line)
-            if line.order_id.type == 'buy':
-                sum_qty += line.quantity
-                sum_amount += line.subtotal
-                sum_not_in += line.quantity - line.quantity_in
-            else:   # 退货时数量、采购额、未入库数量均取反
-                sum_qty += - line.quantity
-                sum_amount += - line.subtotal
-                sum_not_in += line.quantity_in - line.quantity
-
-        for line in buy_order_line.search(self._get_domain(), order='goods_id'):
-            index += 1
-            after_id = line_ids[index:] and line_ids[index:][0]  # 下一个明细行
-            if after_id:
-                after = buy_order_line.search([('id', '=', after_id.id)])
-
-            # 以下分别为明细行上数量、采购额、未入库数量
-            qty = line.quantity
-            amount = line.subtotal
-            qty_not_in = line.quantity - line.quantity_in
-            if line.order_id.type == 'return':  # 退货时数量、采购额、未入库数量均取反
-                qty = - qty
-                amount = - amount
-                qty_not_in = - qty_not_in
+            is_buy = line.order_id.type == 'buy' and 1 or -1  # 是否购货订单
+            # 以下分别为明细行上数量、采购额、未入库数量，退货时均取反
+            qty = is_buy * line.quantity
+            amount = is_buy * line.subtotal
+            qty_not_in = is_buy * (line.quantity - line.quantity_in)
             # 创建跟踪表明细行（非小计行）
-            track = self._create_track_line(line, qty, amount, qty_not_in)
+            track = self.env['buy.order.track'].create(
+                self._prepare_track_line(line, qty, amount, qty_not_in))
             res.append(track.id)
 
-            if not after_id:  # 如果是最后一个明细行，则在最后增加一个小计行
-                total_qty += qty
-                total_not_in += qty_not_in
-                total_amount += amount
-                summary_last_track = self._create_track_summary_line(total_qty, total_amount, total_not_in)
-                res.append(summary_last_track.id)
-                continue
-
-            # 逐行累加数量、采购额和未入库数量
-            total_qty += qty
-            total_not_in += qty_not_in
-            total_amount += amount
-            if line.goods_id != after.goods_id:  # 如果下一个是不同商品，则增加一个小计行
-                summary_track = self._create_track_summary_line(total_qty, total_amount, total_not_in)
-                res.append(summary_track.id)
-                total_qty = total_amount = total_not_in = 0  # 计算不同的商品时先将初始值清零
-
-        sum_track = self.env['buy.order.track'].create({
-            'goods_state': u'合计',
-            'qty': sum_qty,
-            'amount': sum_amount,
-            'qty_not_in': sum_not_in,
-        })
-        res.append(sum_track.id)
         view = self.env.ref('buy.buy_order_track_tree')
         return {
             'name': u'采购订单跟踪表',
